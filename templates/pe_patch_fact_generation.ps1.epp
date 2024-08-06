@@ -282,9 +282,11 @@ function Invoke-RefreshPuppetFacts {
     # providing we got a result above, get a filtered list of security updates
     if ($null -ne $allUpdates) {
         $securityUpdates = Get-SecurityUpdates($allUpdates)
+        $criticalUpdates = Get-CriticalUpdates($allUpdates)
     }
     else {
         $securityUpdates = $null
+        $criticalUpdates = $null
     }
 
     #paths to facts
@@ -292,7 +294,9 @@ function Invoke-RefreshPuppetFacts {
     $updateFile = Join-Path -Path $dataDir -ChildPath 'package_updates'
     $kbFile = Join-Path -Path $dataDir -ChildPath 'missing_update_kbs'
     $secKbFile = Join-Path -Path $dataDir -ChildPath 'missing_security_kbs'
+    $criticalKbFile = Join-Path -Path $dataDir -ChildPath 'missing_critical_kbs'
     $secUpdateFile = Join-Path -Path $dataDir -ChildPath 'security_package_updates'
+    $criticalUpdateFile = Join-Path -Path $dataDir -ChildPath 'critical_package_updates'
     $rebootReqdFile = Join-Path -Path $dataDir -ChildPath  'reboot_required'
 
     # backup previous package_updates file if it exists
@@ -316,11 +320,21 @@ function Invoke-RefreshPuppetFacts {
     # filter to security updates and output
     $securityUpdates | Select-Object -ExpandProperty Title | Out-File $secUpdateFile -Encoding ascii
 
-    if ($securityUpdates -ne $null) {
+    # filter to critical updates and output
+    $criticalUpdates | Select-Object -ExpandProperty Title | Out-File $criticalUpdateFile -Encoding ascii
+
+    if ($null -ne $securityUpdates) {
         # output list of KBs that need to be applied
         $securityUpdates | ForEach-Object { $_.KBArticleIDs | ForEach-Object { "KB$_" } } | Select-Object -Unique | Out-File $secKbFile -Encoding ascii
     } else {
         $securityUpdates | Out-File $secKbFile -Encoding ascii
+    } 
+
+    if ($null -ne $criticalUpdates) {
+        # output list of KBs that need to be applied
+        $criticalUpdates | ForEach-Object { $_.KBArticleIDs | ForEach-Object { "KB$_" } } | Select-Object -Unique | Out-File $criticalKbFile -Encoding ascii
+    } else {
+        $criticalUpdates | Out-File $criticalKbFile -Encoding ascii
     } 
 
     # get pending reboot details
@@ -328,15 +342,15 @@ function Invoke-RefreshPuppetFacts {
 
     # upload facts if new package_updates is different than the old one
     $updateFileContents = (Get-Content $updateFile)
-    if ($updateFileContents -eq $null) { $updateFileContents = " " }
+    if ($null -eq $updateFileContents) { $updateFileContents = " " }
     $updateFilePreviousContents = (Get-Content "$updateFile.previous")
-    if ($updateFilePreviousContents -eq $null) { $updateFilePreviousContents = " " }
+    if ($null -eq $updateFilePreviousContents) { $updateFilePreviousContents = " " }
     Remove-Item -Path "$updateFile.previous"
     $diff = (Compare-Object $updateFileContents $updateFilePreviousContents)
     if ($diff) {
         Add-LogEntry "Uploading puppet facts"
-        $puppetCmd = Join-Path "<%= $windows_puppet_installpath %>" -ChildPath "\bin\puppet.bat"
-        & $puppetCmd facts upload --environment="<%= $environment %>" --color=false
+        $puppetCmd = Join-Path "C:\Program Files\Puppet Labs\Puppet" -ChildPath "\bin\puppet.bat"
+        & $puppetCmd facts upload --environment="production" --color=false
     }
 }
 
@@ -394,6 +408,30 @@ function Get-SecurityUpdates {
 
         # return security updates
         $secUpdates
+    }
+}
+
+function Get-CriticalUpdates {
+    # filters update list to critical only
+    # inputs - update list from an update search
+    # outputs - filtered list
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory = $true)]$Updates
+    )
+    # filter to critical updates
+    $criticalUpdates = $Updates | Where-Object { $_.MsrcSeverity -eq "Critical" }
+
+    # count them
+    if ($criticalUpdates) {
+        $criticalUpdateCount = @($criticalUpdates).count
+
+        Add-LogEntry "Detected $criticalUpdateCount of the required updates are critical updates:"
+
+        $criticalUpdates | ForEach-Object { Add-LogEntry "  - $($_.title)" }
+
+        # return security updates
+        $criticalUpdates
     }
 }
 

@@ -96,6 +96,42 @@ else
       data
     end
 
+    chunk(:kb_criticaulupdates) do
+      data = {}
+      kblist = []
+      kbfile = pe_patch_dir + '/missing_critical_kbs'
+      if File.file?(kbfile) && !File.zero?(kbfile)
+        kbs = File.open(kbfile, 'r').read
+        kbs.each_line do |line|
+          kblist.push line.chomp
+        end
+      end
+      data['missing_critical_kbs'] = kblist
+      data
+    end
+
+    chunk(:criticalupdates) do
+      data = {}
+      criticalupdatelist = []
+      criticalupdatefile = pe_patch_dir + '/critical_package_updates'
+      if File.file?(criticalupdatefile)
+        if (Time.now - File.mtime(criticalupdatefile)) / (24 * 3600) > 10
+          warnings['critical_update_file_time'] = 'Critical update file has not been updated in 10 days'
+        end
+        criticalupdates = File.open(criticalupdatefile, 'r').read
+        criticalupdates.each_line do |line|
+          next if line.empty?
+          next if line =~ /^#|^$/
+          criticalupdatelist.push line.chomp
+        end
+      else
+        warnings['critical_update_file'] = 'Critical update file not found, update information invalid'
+      end
+      data['critical_package_updates'] = criticalupdatelist
+      data['critical_package_update_count'] = criticalupdatelist.count
+      data
+    end
+
     chunk(:blackouts) do
       data = {}
       arraydata = {}
