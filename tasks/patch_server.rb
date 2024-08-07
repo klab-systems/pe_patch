@@ -418,20 +418,25 @@ end
 
 log.info "Reboot after patching set to #{reboot}"
 
-# Should we only apply security patches?
+# Should we filter patches?
 security_only = ''
-if params['security_only']
-  if params['security_only'] == true
+critical_only = ''
+if params['patch_filter']
+  if params['patch_filter'] == 'security_only'
     security_only = true
-  elsif params['security_only'] == false
+    critical_only = false
+  elsif params['patch_filter'] == 'critical_only'
     security_only = false
+    critical_only = true
+  elsif params['patch_filter'] == ''
+    security_only = false
+    critical_only = false
   else
-    err('109', 'pe_patch/params', 'Invalid boolean to security_only parameter', starttime)
+    err('109', 'pe_patch/params', 'Invalid value, please provide security_only, critical_only, or \'\'', starttime)
   end
-else
-  security_only = false
 end
 log.info "Apply only security patches set to #{security_only}"
+log.info "Apply only critical patches set to #{critical_only}"
 
 # Have we had any yum parameter specified?
 yum_params = if params['yum_params']
@@ -581,9 +586,9 @@ if facts['values']['os']['family'] == 'RedHat'
     log.debug "Getting updated package list for job #{job}"
     updated_packages, stderr, status = Open3.capture3("yum history info #{job}")
     err(status, 'pe_patch/yum', stderr, starttime) if status != 0
-    # Older versions of yum add "Transaction performed with" to the output, with 
+    # Older versions of yum add "Transaction performed with" to the output, with
     # installed package lines. We want to skip those so they are not included
-    # in the list of packages we just updated. If we can't find it, err on 
+    # in the list of packages we just updated. If we can't find it, err on
     # the side of caution and don't filter the lines at all.
     lines = updated_packages.split("\n")
     index = lines.index { |l| l =~ /Packages Altered/ } || 0
@@ -622,8 +627,8 @@ elsif facts['values']['os']['family'] == 'Debian'
   apt_std_out, stderr, status = Open3.capture3("#{deb_front} apt-get #{dpkg_params} -y #{deb_opts} #{apt_mode}")
   err(status, 'pe_patch/apt', stderr, starttime) if status != 0
 
-  # PE-33166: Since we use apt-get install for security-only runs, this marks 
-  # all the packages as manual. Since these might be things like kernels that 
+  # PE-33166: Since we use apt-get install for security-only runs, this marks
+  # all the packages as manual. Since these might be things like kernels that
   # people want to use apt autoremove with, we mark them as auto here to allow that.
   if security_only
     mark_stdout, stderr, status = Open3.capture3("#{deb_front} apt-mark auto #{pkg_list.join(' ')}")
@@ -640,15 +645,17 @@ elsif facts['values']['os']['family'] == 'windows'
   # we're on windows
 
   # Are we doing security only patching?
-  security_arg = if security_only == true
+  filter_arg = if security_only == true && critical_only == false
                    '-SecurityOnly'
-                 else
+               elsif security_only == false && critical_only == true
+                   '-CriticalOnly'
+               else
                    ''
-                 end
+               end
 
   # build patching command
   powershell_cmd = "#{ENV['systemroot']}/system32/WindowsPowerShell/v1.0/powershell.exe -NonInteractive -ExecutionPolicy RemoteSigned -File"
-  win_patching_cmd = "#{powershell_cmd} #{patch_script} #{security_arg} -Timeout #{timeout}"
+  win_patching_cmd = "#{powershell_cmd} #{patch_script} #{filter_arg} -Timeout #{timeout}"
 
   log.info 'Running patching powershell script'
 

@@ -32,6 +32,9 @@ Force running in scheduled task mode. This indended for use in a remote session,
 .PARAMETER SecurityOnly
 Switch, when set the script will only install updates with a category that includes Security Update.
 
+.PARAMETER CriticalOnly
+Switch, when set the script will only install updates with MsrcSeverity of Critical.
+
 .PARAMETER UpdateCriteria
 Criteria used for update detection. This ultimately drives which updates will be installed. The default for this script is determined by pe_patch::windows_update_criteria, and is "IsInstalled=0 and IsHidden=0 and Type='Software'" unless otherwise specified, which should be suitable in most cases, and relies on your upstream update approvals. Note that this is not validated, if the syntax is not validated the script will fail. See MSDN docs for valid syntax - https://docs.microsoft.com/en-us/windows/win32/api/wuapi/nf-wuapi-iupdatesearcher-search
 
@@ -77,6 +80,12 @@ param(
     [Parameter(ParameterSetName = "InstallUpdates-ForceSchedTask")]
     [Parameter(ParameterSetName = "InstallUpdates")]
     [Switch]$SecurityOnly,
+
+    # only install critical updates
+    [Parameter(ParameterSetName = "InstallUpdates-Forcelocal")]
+    [Parameter(ParameterSetName = "InstallUpdates-ForceSchedTask")]
+    [Parameter(ParameterSetName = "InstallUpdates")]
+    [Switch]$CriticalOnly,
 
     # update criteria
     [Parameter(ParameterSetName = "InstallUpdates-Forcelocal")]
@@ -608,6 +617,30 @@ $scriptBlock = {
         }
     }
 
+    function Get-CriticalUpdates {
+        # filters update list to critical only
+        # inputs - update list from an update search
+        # outputs - filtered list
+        [CmdletBinding()]
+        Param(
+            [Parameter(Mandatory = $true)]$Updates
+        )
+        # filter to critical updates
+        $criticalUpdates = $Updates | Where-Object { $_.MsrcSeverity -eq "Critical" }
+
+        # count them
+        if ($criticalUpdates) {
+            $criticalUpdateCount = @($criticalUpdates).count
+
+            Add-LogEntry "Detected $criticalUpdateCount of the required updates are critical updates:"
+
+            $criticalUpdates | ForEach-Object { Add-LogEntry "  - $($_.title)" }
+
+            # return security updates
+            $criticalUpdates
+        }
+    }
+
     function Invoke-UpdateRun {
         # perform an update run
         # inputs - update session
@@ -624,6 +657,10 @@ $scriptBlock = {
         if ($Params.SecurityOnly) {
             Add-LogEntry "Only installing updates that include the security update classification"
             $updatesToInstall = Get-SecurityUpdates -Updates $allUpdates
+        }
+        elseif ($Params.CriticalOnly) {
+            Add-LogEntry "Only installing updates that have MsrcSeverity of Critical"
+            $updatesToInstall = Get-CriticalUpdates -Updates $allUpdates
         }
         else {
             $updatesToInstall = $allUpdates
